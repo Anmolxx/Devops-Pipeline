@@ -1,0 +1,47 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Production builds
+build/
+dist/
+
+# Development
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Version control
+.git
+.gitignore
+.githooks
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage
+.nyc_output
+
+# CI/CD
+.jenkins
+.github/workflows
+
+# Documentation (optional - remove if you want docs in image)
+docs/
+README.md
+CHANGELOG.md
+
+# Other
+.npm
+.eslintcache
+.node_repl_history
+*.tar.gz
+*.zip

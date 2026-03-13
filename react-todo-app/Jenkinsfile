@@ -1,0 +1,257 @@
+// Jenkins Pipeline for React Todo App CI/CD
+// This pipeline automates building, pushing to DockerHub, and deploying the React application
+
+pipeline {
+    agent any
+
+    // Define environment variables
+    environment {
+        DOCKER_USERNAME = credentials('dockerhub-username')
+        DOCKER_PASSWORD = credentials('dockerhub-password')
+        DOCKER_IMAGE_NAME = 'anmoldeepkaur1103/react-todo-app'
+        DOCKER_REGISTRY = 'docker.io'
+        DOCKER_CONTAINER_NAME = 'react-todo-app'
+        DOCKER_PORT = '3000'
+        APP_PORT = '80'
+        GITHUB_REPO = 'https://github.com/Anmolxx/Devops-Pipeline.git'
+        GITHUB_BRANCH = 'main'
+        BUILD_DIRECTORY = 'react-todo-app'
+    }
+
+    // Build triggers
+    triggers {
+        // Poll SCM every 15 minutes
+        pollSCM('H/15 * * * *')
+        // Trigger on GitHub push (requires GitHub plugin webhook configuration)
+        // githubPush()
+    }
+
+    // Build options
+    options {
+        // Keep last 10 builds
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        // Sets build timeout to 30 minutes
+        timeout(time: 30, unit: 'MINUTES')
+        // Add timestamps to console log
+        timestamps()
+    }
+
+    stages {
+        // Stage 1: Clean Workspace and Clone Repository
+        stage('Clone Repository') {
+            steps {
+                script {
+                    echo "========== Stage 1: Cloning GitHub Repository =========="
+                    try {
+                        // Clean up workspace
+                        deleteDir()
+                        
+                        // Clone the repository
+                        git(
+                            url: "${GITHUB_REPO}",
+                            branch: "${GITHUB_BRANCH}",
+                            credentialsId: 'github-credentials' // Optional: only if private repo
+                        )
+                        
+                        // List files to verify clone
+                        sh 'ls -la'
+                        sh 'ls -la ${BUILD_DIRECTORY}'
+                        
+                        echo "✓ Repository cloned successfully"
+                    } catch (Exception e) {
+                        echo "✗ Failed to clone repository: ${e.message}"
+                        currentBuild.result = 'FAILURE'
+                        error('Repository clone failed')
+                    }
+                }
+            }
+        }
+
+        // Stage 2: Build Docker Image
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    echo "========== Stage 2: Building Docker Image =========="
+                    try {
+                        dir("${BUILD_DIRECTORY}") {
+                            // Build the Docker image
+                            sh '''
+                                docker build \
+                                    -t ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} \
+                                    -t ${DOCKER_IMAGE_NAME}:latest \
+                                    --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+                                    --build-arg VCS_REF=$(git rev-parse --short HEAD) \
+                                    .
+                            '''
+                            
+                            // Verify image was built
+                            sh 'docker images | grep react-todo-app'
+                            
+                            echo "✓ Docker image built successfully"
+                            echo "  Image: ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}"
+                            echo "  Image: ${DOCKER_IMAGE_NAME}:latest"
+                        }
+                    } catch (Exception e) {
+                        echo "✗ Docker build failed: ${e.message}"
+                        currentBuild.result = 'FAILURE'
+                        error('Docker build failed')
+                    }
+                }
+            }
+        }
+
+        // Stage 3: Login to DockerHub
+        stage('DockerHub Login') {
+            steps {
+                script {
+                    echo "========== Stage 3: Logging into DockerHub =========="
+                    try {
+                        // Login to Docker registry
+                        sh '''
+                            echo "${DOCKER_PASSWORD}" | docker login \
+                                -u "${DOCKER_USERNAME}" \
+                                --password-stdin \
+                                ${DOCKER_REGISTRY}
+                        '''
+                        
+                        echo "✓ Successfully logged into DockerHub"
+                    } catch (Exception e) {
+                        echo "✗ DockerHub login failed: ${e.message}"
+                        currentBuild.result = 'FAILURE'
+                        error('DockerHub login failed')
+                    }
+                }
+            }
+        }
+
+        // Stage 4: Push Docker Image to DockerHub
+        stage('Push to DockerHub') {
+            steps {
+                script {
+                    echo "========== Stage 4: Pushing Docker Image to DockerHub =========="
+                    try {
+                        // Push image with build number tag
+                        sh 'docker push ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}'
+                        
+                        // Push image with latest tag
+                        sh 'docker push ${DOCKER_IMAGE_NAME}:latest'
+                        
+                        echo "✓ Docker image pushed successfully"
+                        echo "  Pushed: ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}"
+                        echo "  Pushed: ${DOCKER_IMAGE_NAME}:latest"
+                    } catch (Exception e) {
+                        echo "✗ Failed to push Docker image: ${e.message}"
+                        currentBuild.result = 'FAILURE'
+                        error('Docker push failed')
+                    }
+                }
+            }
+        }
+
+        // Stage 5: Deploy Container on EC2
+        stage('Deploy to EC2') {
+            steps {
+                script {
+                    echo "========== Stage 5: Deploying Container on EC2 =========="
+                    try {
+                        // Stop and remove existing container if running
+                        sh '''
+                            echo "Stopping existing container (if any)..."
+                            docker stop ${DOCKER_CONTAINER_NAME} || true
+                            docker rm ${DOCKER_CONTAINER_NAME} || true
+                        '''
+                        
+                        // Pull the latest image from DockerHub
+                        sh 'docker pull ${DOCKER_IMAGE_NAME}:latest'
+                        
+                        // Run the new container
+                        sh '''
+                            docker run -d \
+                                -p ${DOCKER_PORT}:${APP_PORT} \
+                                --name ${DOCKER_CONTAINER_NAME} \
+                                --restart unless-stopped \
+                                --health-cmd="curl -f http://localhost:${APP_PORT}/ || exit 1" \
+                                --health-interval=30s \
+                                --health-timeout=3s \
+                                --health-retries=3 \
+                                ${DOCKER_IMAGE_NAME}:latest
+                        '''
+                        
+                        // Wait for container to be healthy
+                        sh '''
+                            echo "Waiting for container to be healthy..."
+                            sleep 10
+                            docker ps | grep ${DOCKER_CONTAINER_NAME}
+                        '''
+                        
+                        // Display container info
+                        sh 'docker inspect ${DOCKER_CONTAINER_NAME}'
+                        
+                        echo "✓ Container deployed successfully"
+                        echo "  Container Name: ${DOCKER_CONTAINER_NAME}"
+                        echo "  Container Port: ${DOCKER_PORT}"
+                        echo "  Access at: http://<EC2-PUBLIC-IP>:${DOCKER_PORT}"
+                    } catch (Exception e) {
+                        echo "✗ Deployment failed: ${e.message}"
+                        currentBuild.result = 'FAILURE'
+                        error('Deployment failed')
+                    }
+                }
+            }
+        }
+    }
+
+    // Post actions
+    post {
+        always {
+            script {
+                echo "========== Pipeline Completed =========="
+                
+                // Cleanup: Logout from Docker
+                sh 'docker logout || true'
+                
+                // Display final status
+                if (currentBuild.result == 'SUCCESS') {
+                    echo "✓ Pipeline executed successfully!"
+                    echo "Application is now deployed at: http://<EC2-PUBLIC-IP>:3000"
+                } else if (currentBuild.result == 'FAILURE') {
+                    echo "✗ Pipeline failed. Please check the logs above."
+                }
+            }
+        }
+
+        success {
+            script {
+                echo "========== Success Actions =========="
+                echo "✓ Build: #${BUILD_NUMBER}"
+                echo "✓ Repository: ${GITHUB_REPO}"
+                echo "✓ Docker Image: ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}"
+                echo "✓ Docker Image: ${DOCKER_IMAGE_NAME}:latest"
+            }
+        }
+
+        failure {
+            script {
+                echo "========== Failure Actions =========="
+                echo "✗ Build Failed: #${BUILD_NUMBER}"
+                sh 'docker images'
+                sh 'docker ps -a'
+            }
+        }
+
+        unstable {
+            script {
+                echo "========== Unstable Build =========="
+                echo "⚠ Build is unstable: #${BUILD_NUMBER}"
+            }
+        }
+
+        cleanup {
+            script {
+                echo "========== Cleanup =========="
+                // Clean workspace after build
+                deleteDir()
+            }
+        }
+    }
+}
