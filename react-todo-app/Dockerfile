@@ -31,8 +31,8 @@ RUN rm -rf /etc/nginx/conf.d/*
 # Copy custom Nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy built application from Stage 1
-COPY --from=builder /app/build/ .
+# Copy built application from Stage 1 (Vite outputs to dist/)
+COPY --from=builder /app/dist/ .
 
 # Create directories for Nginx
 RUN mkdir -p /var/cache/nginx /var/log/nginx /var/run/nginx
