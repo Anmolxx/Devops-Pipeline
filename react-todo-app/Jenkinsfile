@@ -6,8 +6,8 @@ pipeline {
 
     // Define environment variables
     environment {
-        DOCKER_USERNAME = credentials('dockerhub-username')
-        DOCKER_PASSWORD = credentials('dockerhub-password')
+        DOCKER_USERNAME = 'anmoldeepkaur1103'
+        DOCKER_PASSWORD = 'docker11@Anmol'
         DOCKER_IMAGE_NAME = 'anmoldeepkaur1103/react-todo-app'
         DOCKER_REGISTRY = 'docker.io'
         DOCKER_CONTAINER_NAME = 'react-todo-app'
